@@ -149,7 +149,7 @@
   appId: "1:895251219254:web:e870fbeb413a54842c6997",
   measurementId: "G-08WXNTX7ND"
 };
-        const OPENAI_API_KEY = "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
+        const OPENAI_API_KEY = "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"
 ";
         // ==========================================
 

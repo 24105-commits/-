@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>마이 메디컬 비서 (Firebase + AI + TTS)</title>
+    
+    <style>
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+        .hidden { display: none !important; }
+        
+        /* 로그인 섹션 */
+        #login-section {
+            text-align: center;
+            padding: 50px 20px;
+        }
+        
+        /* 대시보드 섹션 */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .user-name { font-weight: bold; color: #2b6cb0; }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+        }
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+        }
+        
+        /* 버튼 공통 스타일 */
+        button {
+            background-color: #3182ce;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #2b6cb0; }
+        button:disabled { background-color: #cbd5e0; cursor: not-allowed; }
+        #btn-logout { background-color: #e53e3e; }
+        #btn-logout:hover { background-color: #c53030; }
+        
+        /* 병력 리스트 */
+        .history-item {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .history-item:hover {
+            background: #edf2f7;
+            border-color: #cbd5e0;
+            transform: translateY(-2px);
+        }
+        
+        /* AI 결과 박스 */
+        .report-box {
+            background: #ebf8ff;
+            border-left: 5px solid #3182ce;
+            padding: 20px;
+            min-height: 180px;
+            margin-bottom: 15px;
+            border-radius: 0 8px 8px 0;
+            line-height: 1.7;
+            font-size: 14px;
+            white-space: pre-wrap; /* 줄바꿈 유지 */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="login-section" class="container">
+        <h2>🏥 마이 메디컬 비서</h2>
+        <p>안전하게 로그인하여 본인의 병력 확인 및 AI 맞춤 건강 관리를 시작하세요.</p>
+        <br>
+        <button id="btn-login">구글 계정으로 간편 로그인</button>
+    </div>
+
+    <div id="dashboard-section" class="container hidden">
+        <header>
+            <div>👋 <span id="user-info" class="user-name">사용자</span>님, 반가워요!</div>
+            <button id="btn-logout">로그아웃</button>
+        </header>
+
+        <main class="dashboard-grid">
+            <section>
+                <h3>📋 나의 병원 방문 이력</h3>
+                <p>총 방문 횟수: <strong id="visit-count" style="color:#3182ce; font-size:18px;">0</strong>회</p>
+                <hr style="border:0; height:1px; background:#e2e8f0; margin-bottom:15px;">
+                <div id="history-list">
+                    </div>
+            </section>
+
+            <section>
+                <h3>🤖 AI 맞춤형 건강 비서</h3>
+                <div id="ai-report" class="report-box">
+                    왼쪽의 병원 방문 기록 중 하나를 클릭하시면, AI가 분석을 시작하고 건강 맞춤 행동 요령을 알려줍니다.
+                </div>
+                <button id="btn-tts" width="100%" disabled>🔊 AI 조언 음성으로 듣기</button>
+            </section>
+        </main>
+    </div>
+
+    <script type="module">
+        // Firebase 기능별 모듈 불러오기
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // ==========================================
+        // 🔥 [필수 설정] 본인의 Firebase 및 AI 키를 입력하세요!
+        // ==========================================
+       const firebaseConfig = {
+  apiKey: "AIzaSyAo_ux68hyhyfbLivMv7FLBHNafo8AEizQ",
+  authDomain: "test-7b0db.firebaseapp.com",
+  databaseURL: "https://test-7b0db-default-rtdb.firebaseio.com",
+  projectId: "test-7b0db",
+  storageBucket: "test-7b0db.firebasestorage.app",
+  messagingSenderId: "895251219254",
+  appId: "1:895251219254:web:e870fbeb413a54842c6997",
+  measurementId: "G-08WXNTX7ND"
+};
+        const OPENAI_API_KEY = "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
+";
+        // ==========================================
+
+        // 서비스 초기화
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const provider = new GoogleAuthProvider();
+
+        // UI 요소 정의
+        const loginSection = document.getElementById('login-section');
+        const dashboardSection = document.getElementById('dashboard-section');
+        const btnLogin = document.getElementById('btn-login');
+        const btnLogout = document.getElementById('btn-logout');
+        const userInfo = document.getElementById('user-info');
+        const visitCountEl = document.getElementById('visit-count');
+        const historyList = document.getElementById('history-list');
+        const aiReport = document.getElementById('ai-report');
+        const btnTts = document.getElementById('btn-tts');
+
+        let lastAiResponse = ""; // TTS 음성 변환을 위한 텍스트 보관함
+
+        // ------------------------------------------
+        // [기능 1] Firebase Authentication 인증 상태 감시
+        // ------------------------------------------
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                // 로그인 완료 시 화면 전환 및 사용자 데이터 로드
+                loginSection.classList.add('hidden');
+                dashboardSection.classList.remove('hidden');
+                userInfo.textContent = user.displayName || "환자";
+                await loadMedicalData(user.uid);
+            } else {
+                // 로그아웃 상태 시 로그인 창 활성화
+                loginSection.classList.remove('hidden');
+                dashboardSection.classList.add('hidden');
+            }
+        });
+
+        // 로그인 & 로그아웃 이벤트 버튼 연결
+        btnLogin.addEventListener('click', () => signInWithPopup(auth, provider).catch(err => console.error(err)));
+        btnLogout.addEventListener('click', () => signOut(auth));
+
+        // ------------------------------------------
+        // [기능 2] Firebase Firestore 데이터 연동
+        // ------------------------------------------
+        async function loadMedicalData(uid) {
+            try {
+                // 1. 총 방문 횟수 로드
+                const userDocRef = doc(db, "users", uid);
+                const userDoc = await getDoc(userDocRef);
+                if (userDoc.exists()) {
+                    visitCountEl.textContent = userDoc.data().visit_count || 0;
+                }
+
+                // 2. 세부 병력 하위 컬렉션 로드
+                const historyRef = collection(db, "users", uid, "history");
+                const querySnapshot = await getDocs(historyRef);
+                
+                historyList.innerHTML = ""; // 기존 데이터 비우기
+                
+                if (querySnapshot.empty) {
+                    historyList.innerHTML = "<p style='color:#718096;'>등록된 병원 이력이 없습니다. 데이터베이스를 확인해 주세요.</p>";
+                    return;
+                }
+
+                // 문서 반복하며 HTML 동적 생성
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <strong>📅 방문 날짜:</strong> ${data.date}<br>
+                        <strong>🤢 내원 사유:</strong> ${data.reason}<br>
+                        <span style="font-size:13px; color:#4a5568;">🩺 의사 소견: ${data.doctor_note}</span>
+                    `;
+                    
+                    // 리스트의 항목 클릭 시 생성형 AI 함수 호출
+                    item.addEventListener('click', () => askAI(data.reason, data.doctor_note));
+                    historyList.appendChild(item);
+                });
+            } catch (error) {
+                console.error("데이터베이스 연동 실패:", error);
+            }
+        }
+
+        // ------------------------------------------
+        // [기능 3] API 활용 생성형 인공지능(Gemini) 연동
+        // ------------------------------------------
+        async function askAI(reason, note) {
+            aiReport.textContent = "🤖 AI 비서가 처방과 증상을 분석 중입니다. 잠시만 기다려주세요...";
+            btnTts.disabled = true;
+            btnTts.textContent = "🔊 AI 조언 음성으로 듣기";
+            window.speechSynthesis.cancel(); // 혹시 실행 중이던 음성이 있다면 중지
+
+            // 생성형 AI에게 보낼 지시문(프롬프트) 구성
+            const prompt = `환자의 병원 방문 사유는 [${reason}]이며, 의사의 소견은 [${note}]입니다. 이 정보를 바탕으로 환자가 집에서 실천할 수 있는 맞춤형 건강 관리 수칙 3가지를 따뜻하고 친절한 말투의 한글 문장으로 정리해 주세요.`;
+
+            try {
+                const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+            {
+                role: "system",
+                content: "당신은 친절한 건강 관리 비서입니다."
+            },
+            {
+                role: "user",
+                content: prompt
+            }
+        ],
+        max_tokens: 500,
+        temperature: 0.7
+    })
+});
+
+const resData = await response.json();
+const aiText = resData.choices[0].message.content;
+                
+                aiReport.textContent = aiText; // 화면에 분석 출력
+                lastAiResponse = aiText;       // TTS에 전달할 텍스트 저장
+                btnTts.disabled = false;       // 음성 듣기 버튼 활성화
+            } catch (error) {
+                aiReport.textContent = "❌ AI 분석 도중 오류가 발생했습니다. API 키 및 연결 상태를 확인하세요.";
+                console.error(error);
+            }
+        }
+
+        // ------------------------------------------
+        // [기능 4] Web Speech API를 활용한 TTS 기능
+        // ------------------------------------------
+        btnTts.addEventListener('click', () => {
+            if (!lastAiResponse) return;
+            
+            if ('speechSynthesis' in window) {
+                // 토글 제어: 현재 대사 중이라면 중지
+                if (window.speechSynthesis.speaking) {
+                    window.speechSynthesis.cancel();
+                    btnTts.textContent = "🔊 AI 조언 음성으로 듣기";
+                    return;
+                }
+
+                // 음성 객체 설정
+                const utterance = new SpeechSynthesisUtterance(lastAiResponse);
+                utterance.lang = 'ko-KR'; // 언어: 한국어
+                utterance.rate = 1.0;     // 속도: 보통
+
+                // 음성 재생이 끝났을 때의 이벤트
+                utterance.onend = () => {
+                    btnTts.textContent = "🔊 AI 조언 음성으로 듣기";
+                };
+
+                btnTts.textContent = "⏹️ 재생 중지";
+                window.speechSynthesis.speak(utterance);
+            } else {
+                alert("이 브라우저는 웹 음성 안내(TTS) 기능을 지원하지 않습니다.");
+            }
+        });
+    </script>
+</body>
+</html>
